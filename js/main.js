@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {
-  MAX_LEVEL, DAY_SECONDS, NIGHT_SECONDS, WORLD, PLAYER,
-  WEAPONS, DISGUISES, UPGRADES, upgradeCost, derive, scolding,
+  MAX_LEVEL, DAY_SECONDS, WORLD, PLAYER,
+  WEAPONS, DISGUISES, UPGRADES, upgradeCost, derive, scolding, janitorLine,
 } from './config.js';
 import * as Save from './save.js';
 import { sfx, unlock as unlockAudio } from './audio.js';
@@ -9,6 +9,7 @@ import { World, makeRng } from './world.js';
 import { Player } from './player.js';
 import { LockPuzzle } from './lock.js';
 import { Guard, Coin } from './guards.js';
+import { Janitor, Patron, crowdPressure } from './crowd.js';
 import { ProjectileSystem, FoodItem } from './projectiles.js';
 import { UI } from './ui.js';
 
@@ -37,15 +38,20 @@ class Game {
     this.save = Save.load() || Save.defaultSave();
     this.stats = derive(this.save);
 
-    this.guards = [];
-    this.coins = [];
-    this.food = [];
+    this.guards = [];      // day
+    this.patrons = [];     // day
+    this.coins = [];       // day
+    this.janitors = [];    // night
+    this.food = [];        // night
     this.timer = 0;
     this.cooldown = 0;
-    this.eaten = 0;
+    this.eaten = 0;        // scraps you got
+    this.bagged = 0;       // scraps Ron got
+    this.nabbed = 0;       // times Ron put you back in the cage
     this.ammo = 0;
     this.hits = 0;
-    this.nightCoins = 0;
+    this.dayCoins = 0;
+    this.grabT = 0;        // how long the crowd has had hold of you
     this.doorUnlocked = false;
     this.clock = new THREE.Clock();
     this.time = 0;
@@ -234,38 +240,47 @@ class Game {
     this._clearActors();
 
     this.hits = 0;
-    this.nightCoins = 0;
+    this.dayCoins = 0;
     this.eaten = 0;
+    this.bagged = 0;
     this.ammo = 0;
     this.doorUnlocked = false;
+    this.nabbed = 0;
+    this.grabT = 0;
 
-    this._startDay();
+    this._startNight();
   }
 
-  _startDay() {
+  // ---------------------------------------------------------------- night
+  // The zoo is shut. Pick the padlock, get out, and strip the place of leftovers
+  // before Ron bins them.
+  _startNight() {
     const C = WORLD.cage;
-    this.state = 'day';
-    this.timer = DAY_SECONDS;
-    this.world.setPhase('day');
+    const cfg = this.stats.cfg;
+    this.state = 'night';
+    this.timer = cfg.night;
+    this.world.setPhase('night');
     this.player.teleport(C.x, C.z - 3, Math.PI); // facing the door end of the cage
     this.player.enabled = true;
     this._spawnFood();
+    this._spawnJanitors();
 
     this.ui.setLevel(this.save.level);
-    this.ui.setPhase('day');
+    this.ui.setPhase('night');
     this.ui.setCoins(this.save.coins);
     this.ui.setHits(this.hits);
     this.ui.setWeapon(this.stats.weapon.name.toUpperCase());
-    this.ui.setAmmo(0, this.food.length, '🍔');
+    this.ui.setAmmo(0, this.food.length, '🍔', false);
     this.ui.fade(false);
     this.ui.fadeCaption('');
     this.ui.vignette(false);
+    this.ui.crowd(0, 0);
     this.ui.prompt('CLICK TO CAPTURE YOUR MOUSE');
-    sfx.dawn();
+    sfx.night();
 
-    const cfg = this.stats.cfg;
     this.ui.toast(`Level ${this.save.level} — ${cfg.locks} padlock${cfg.locks > 1 ? 's' : ''}, ${cfg.rungs} rungs each.`);
     setTimeout(() => this.ui.toast('Find the cage door. Press E at the lock.'), 1400);
+    setTimeout(() => this.ui.toast(`Ron is binning the leftovers. Beat him to them.`, 'bad'), 2900);
   }
 
   /** Kill any overlay that happened to be open when the clock ran out. */
@@ -275,20 +290,22 @@ class Game {
     this.ui.hide('shop');
   }
 
-  async _beginNight() {
+  // ---------------------------------------------------------------- day
+  async _beginDay() {
     this.state = 'transition';
     this._dismissOverlays();
     this.player.enabled = false;
     this.player.releaseLock();
     this.ui.prompt(null);
-    this.ui.fadeCaption('NIGHTFALL');
+    this.ui.fadeCaption('OPENING TIME');
     this.ui.fade(true);
-    sfx.night();
+    sfx.dawn();
     await sleep(1500);
 
     this._clearFood();
+    this._clearJanitors();
     this.projectiles.clear();
-    this.world.setPhase('night');
+    this.world.setPhase('day');
     if (this.doorUnlocked) this.world.openDoor();
 
     const C = WORLD.cage;
@@ -297,10 +314,12 @@ class Game {
 
     this.ammo = Math.min(this.stats.capacity, this.eaten * this.stats.poopPerFood);
     this._spawnGuards();
+    this._spawnPatrons();
 
-    this.state = 'night';
-    this.timer = NIGHT_SECONDS;
-    this.ui.setPhase('night');
+    this.state = 'day';
+    this.timer = DAY_SECONDS;
+    this.grabT = 0;
+    this.ui.setPhase('day');
     this.ui.setAmmo(this.ammo, this.stats.capacity, '💩');
     this.ui.fadeCaption('');
     this.ui.fade(false);
@@ -308,21 +327,24 @@ class Game {
     await sleep(600);
 
     this.ui.toast(this.doorUnlocked
-      ? `Your door is still open. ${this.ammo} rounds loaded.`
-      : 'You never picked the lock. Do it now — in the dark.', this.doorUnlocked ? 'good' : 'bad');
+      ? `Gates are open. ${this.ammo} rounds loaded.`
+      : 'You never picked the lock. Do it now — in front of everyone.', this.doorUnlocked ? 'good' : 'bad');
+    setTimeout(() => this.ui.toast('Patrons will shout for the guards. Do not let them ring you in.', 'bad'), 1800);
   }
 
-  async _endNight(caught, byGuard) {
-    if (this.state !== 'night') return;
+  /** @param cause 'guard' | 'crowd' | null — null means you lasted to closing time. */
+  async _endDay(cause, by) {
+    if (this.state !== 'day') return;
     this.state = 'transition';
     this._dismissOverlays();
     this.player.enabled = false;
     this.player.releaseLock();
     this.ui.vignette(false);
+    this.ui.crowd(0, 0);
     this.ui.prompt(null);
 
-    if (caught) sfx.taze();
-    this.ui.fadeCaption(caught ? 'CAUGHT' : 'DAWN');
+    if (cause) sfx.taze();
+    this.ui.fadeCaption(cause ? 'CAUGHT' : 'CLOSING TIME');
     this.ui.fade(true);
     await sleep(1600);
 
@@ -331,11 +353,11 @@ class Game {
     this.player.teleport(C.x, C.z - 3, Math.PI); // facing the door end of the cage
     this._clearActors();
 
-    const rng = makeRng(this.save.level * 31 + this.hits * 7 + (caught ? 3 : 0));
-    const scold = scolding(this.hits, caught, rng);
-    const bonus = caught ? 0 : Math.round(40 + this.save.level * 4);
+    const rng = makeRng(this.save.level * 31 + this.hits * 7 + (cause ? 3 : 0));
+    const scold = scolding(this.hits, cause, rng);
+    const bonus = cause ? 0 : Math.round(40 + this.save.level * 4);
 
-    this.save.coins += this.nightCoins + bonus;
+    this.save.coins += bonus;
     this.save.totalHits += this.hits;
     this.save.bestNight = Math.max(this.save.bestNight, this.hits);
     this.save.level += 1;
@@ -343,21 +365,26 @@ class Game {
     this.stats = derive(this.save);
     this.ui.setCoins(this.save.coins);
 
+    const title = cause === 'guard' ? `TAZED BY ${by?.name || 'A GUARD'}`
+      : cause === 'crowd' ? 'PINNED BY THE PUBLIC'
+      : 'YOU LASTED TO CLOSING TIME';
+
     this.ui.fade(false);
     this.ui.fadeCaption('');
     this.ui.showHud(false);
     this.ui.showSummary({
-      title: caught ? `TAZED BY ${(byGuard?.name || 'A GUARD')}` : 'YOU MADE IT TO DAWN',
+      title,
       scold,
-      calm: !caught,
+      calm: !cause,
       stats: [
         { k: 'Guards hit', v: this.hits },
-        { k: 'Coins grabbed', v: this.nightCoins },
+        { k: 'Scraps eaten', v: this.eaten },
+        { k: 'Coins grabbed', v: this.dayCoins },
         { k: 'Escape bonus', v: bonus },
         { k: 'Wallet', v: this.save.coins },
       ],
     });
-    $('sum-next').textContent = this.save.level > MAX_LEVEL ? 'SEE THE ENDING' : `NEXT DAY — LEVEL ${this.save.level}`;
+    $('sum-next').textContent = this.save.level > MAX_LEVEL ? 'SEE THE ENDING' : `NEXT NIGHT — LEVEL ${this.save.level}`;
   }
 
   _win() {
@@ -369,7 +396,7 @@ class Game {
     this.ui.showWin([
       { k: 'Levels cleared', v: MAX_LEVEL },
       { k: 'Total hits', v: this.save.totalHits },
-      { k: 'Best night', v: this.save.bestNight },
+      { k: 'Best day', v: this.save.bestNight },
       { k: 'Coins', v: this.save.coins },
     ]);
   }
@@ -378,15 +405,23 @@ class Game {
   _clearActors() {
     for (const g of this.guards) g.dispose();
     for (const c of this.coins) c.dispose();
+    for (const p of this.patrons) p.dispose();
     this.guards.length = 0;
     this.coins.length = 0;
+    this.patrons.length = 0;
     this._clearFood();
+    this._clearJanitors();
     this.projectiles.clear();
   }
 
   _clearFood() {
     for (const f of this.food) f.dispose();
     this.food.length = 0;
+  }
+
+  _clearJanitors() {
+    for (const j of this.janitors) j.dispose();
+    this.janitors.length = 0;
   }
 
   _spawnFood() {
@@ -408,14 +443,38 @@ class Game {
     for (const s of picked) this.food.push(new FoodItem(this.world, s, rng));
   }
 
+  /** Waypoints far enough from the cage that you get a moment before trouble. */
+  _spawnPool(minDist) {
+    const wps = this.world.waypoints.filter(w =>
+      Math.hypot(w.x - WORLD.cage.x, w.z - WORLD.cage.z) > minDist);
+    return wps.length ? wps : this.world.waypoints;
+  }
+
   _spawnGuards() {
     const cfg = this.stats.cfg;
     const rng = makeRng(this.save.level * 977 + 41);
-    const wps = this.world.waypoints.filter(w => Math.hypot(w.x - WORLD.cage.x, w.z - WORLD.cage.z) > 26);
-    const pool = wps.length ? wps : this.world.waypoints;
+    const pool = this._spawnPool(26);
     for (let i = 0; i < cfg.guards; i++) {
-      const spawn = pool[(rng() * pool.length) | 0];
-      this.guards.push(new Guard(this.world, cfg, i, spawn));
+      this.guards.push(new Guard(this.world, cfg, i, pool[(rng() * pool.length) | 0]));
+    }
+  }
+
+  _spawnJanitors() {
+    this._clearJanitors();
+    const cfg = this.stats.cfg;
+    const rng = makeRng(this.save.level * 613 + 17);
+    const pool = this._spawnPool(20);
+    for (let i = 0; i < cfg.janitors; i++) {
+      this.janitors.push(new Janitor(this.world, cfg, i, pool[(rng() * pool.length) | 0]));
+    }
+  }
+
+  _spawnPatrons() {
+    const cfg = this.stats.cfg;
+    const rng = makeRng(this.save.level * 419 + 91);
+    const pool = this._spawnPool(18);
+    for (let i = 0; i < cfg.patrons; i++) {
+      this.patrons.push(new Patron(this.world, cfg, i, pool[(rng() * pool.length) | 0]));
     }
   }
 
@@ -447,7 +506,7 @@ class Game {
     this.lock.start({
       locks: cfg.locks, rungs: cfg.rungs,
       speed: cfg.lockSpeed, ramp: cfg.lockRamp,
-      arc: cfg.lockArc, shrink: cfg.lockShrink,
+      window: cfg.lockWindow, windowShrink: cfg.windowShrink,
       reversals: cfg.reversals, decoys: cfg.decoys,
     });
   }
@@ -484,8 +543,8 @@ class Game {
   }
 
   _throw() {
-    if (this.state !== 'night') {
-      if (this.state === 'day') this.ui.toast('Nothing to throw yet. Eat first.', 'bad');
+    if (this.state !== 'day') {
+      if (this.state === 'night') this.ui.toast('Nothing to throw yet. Eat first.', 'bad');
       return;
     }
     if (this.cooldown > 0) return;
@@ -546,22 +605,24 @@ class Game {
     const paused = this.ui.isOpen('shop') || this.state === 'transition';
 
     if (playing && !paused) {
-      // the day clock keeps ticking while you fumble with the padlock
+      // the clock keeps ticking while you fumble with the padlock
       this.timer -= dt;
       this.ui.setTimer(this.timer);
       if (this.timer <= 0) {
-        if (this.state === 'day') { this._beginNight(); }
-        else { this._endNight(false, null); }
+        if (this.state === 'night') { this._beginDay(); }
+        else { this._endDay(null, null); }
         return;
       }
     }
 
     if (!this.ui.anyOpen() && this.state !== 'transition') {
-      this.player.update(dt, this.world, this.stats.speed);
+      // a crowd that has hold of you drags your speed down to a shuffle
+      const speed = this.stats.speed * (this.grabT > 0 ? this.stats.grabSpeed : 1);
+      this.player.update(dt, this.world, speed);
     }
 
     if (this.cooldown > 0) this.cooldown = Math.max(0, this.cooldown - dt);
-    this.ui.crosshair(this.state === 'night' ? (this.cooldown > 0 ? 'cooling' : 'hot') : '');
+    this.ui.crosshair(this.state === 'day' ? (this.cooldown > 0 ? 'cooling' : 'hot') : '');
 
     if (this._swingDoor && this.world.doorPivot) {
       const p = this.world.doorPivot;
@@ -577,21 +638,73 @@ class Game {
     this.renderer.render(this.scene, this.camera);
   }
 
-  _updateDay(dt) {
+  // ---------------------------------------------------------------- night loop
+  _updateNight(dt) {
     for (let i = this.food.length - 1; i >= 0; i--) {
       const f = this.food[i];
       f.update(dt, this.time);
       const d = Math.hypot(f.pos.x - this.player.pos.x, f.pos.z - this.player.pos.z);
       if (d < PLAYER.pickupRange && Math.abs(f.pos.y - 1) < 2.2) {
+        f.eaten = true;
         f.dispose();
         this.food.splice(i, 1);
         this.eaten++;
         sfx.eat();
-        this.ui.setAmmo(this.eaten, this.eaten + this.food.length, '🍔');
-        this.ui.toast(`Ate ${article(f.type.name)} ${f.type.emoji}  (+${this.stats.poopPerFood} 💩 tonight)`, 'good');
+        this.ui.setAmmo(this.eaten, this.eaten + this.food.length, '🍔', false);
+        this.ui.toast(`Ate ${article(f.type.name)} ${f.type.emoji}  (+${this.stats.poopPerFood} 💩 tomorrow)`, 'good');
       }
     }
 
+    let chased = false;
+    for (const j of this.janitors) {
+      const r = j.update(
+        dt, this.player, this.food,
+        janitor => this._nabbed(janitor),
+        food => this._binned(food),
+      );
+      if (r.chasing) chased = true;
+    }
+    this.ui.vignette(false);
+    this.ui.crowd(0, 0);
+    if (chased && !this._alertCooldown) { sfx.alert(); this._alertCooldown = 1.4; }
+    if (this._alertCooldown > 0) this._alertCooldown = Math.max(0, this._alertCooldown - dt);
+
+    this._doorPrompt();
+  }
+
+  /** Ron has you by the scruff: back in the cage, fresh padlock, lighter pockets. */
+  _nabbed(janitor) {
+    if (this.state !== 'night') return;
+    const C = WORLD.cage;
+    const lost = Math.round(this.eaten * this.stats.cfg.foodLossOnCatch);
+    this.eaten = Math.max(0, this.eaten - lost);
+    this.nabbed++;
+
+    this.doorUnlocked = false;
+    this.world.closeDoor();
+    this._swingDoor = false;
+    this.player.teleport(C.x, C.z - 3, Math.PI);
+
+    sfx.lockFail();
+    const line = janitorLine(makeRng(this.save.level * 71 + this.nabbed * 13));
+    this.ui.toast(`“${line.text}” — ${line.who}`, 'bad');
+    if (lost > 0) setTimeout(() => this.ui.toast(`He took ${lost} scrap${lost > 1 ? 's' : ''} off you.`, 'bad'), 900);
+    this.ui.setAmmo(this.eaten, this.eaten + this.food.length, '🍔', false);
+  }
+
+  /** A scrap you were too slow to reach has gone in the bag. */
+  _binned(food) {
+    const i = this.food.indexOf(food);
+    if (i < 0) return;
+    food.eaten = true;
+    food.dispose();
+    this.food.splice(i, 1);
+    this.bagged++;
+    this.ui.setAmmo(this.eaten, this.eaten + this.food.length, '🍔', false);
+    if (this.food.length === 0) this.ui.toast('Ron has binned the lot. Nothing left out there.', 'bad');
+  }
+
+  _doorPrompt() {
     if (!this.doorUnlocked && this._nearDoor() && !this.ui.anyOpen()) {
       this.ui.prompt('PRESS <kbd>E</kbd> TO PICK THE LOCK');
     } else if (this.player.locked || this.ui.anyOpen()) {
@@ -599,24 +712,42 @@ class Game {
     }
   }
 
-  _updateNight(dt) {
+  // ---------------------------------------------------------------- day loop
+  _updateDay(dt) {
+    const cfg = this.stats.cfg;
     let anyChasing = false, anyZone = false;
+
     for (const g of this.guards) {
       const r = g.update(
         dt, this.player, this.stats.detectMul, this.stats.attackMul,
-        guard => this._endNight(true, guard),
-        guard => { if (!this._alertCooldown) { sfx.alert(); this._alertCooldown = 0.9; } }
+        guard => this._endDay('guard', guard),
+        () => { if (!this._alertCooldown) { sfx.alert(); this._alertCooldown = 0.9; } }
       );
       if (r.chasing) anyChasing = true;
       if (r.inZone) anyZone = true;
     }
+
+    for (const p of this.patrons) {
+      p.update(dt, this.player, patron => this._patronShout(patron));
+    }
+
+    // --- being ringed in by the public
+    const { count, pinned } = crowdPressure(this.patrons, this.player, cfg);
+    if (pinned) {
+      this.grabT += dt;
+      if (this.grabT >= this.stats.grabLimit) { this._endDay('crowd', null); return; }
+    } else {
+      this.grabT = Math.max(0, this.grabT - dt * 2);   // shake it off quickly once clear
+    }
+    this.ui.crowd(count, cfg.crowdSize, this.grabT / this.stats.grabLimit);
+
     if (this._alertCooldown > 0) this._alertCooldown = Math.max(0, this._alertCooldown - dt);
-    this.ui.vignette(anyChasing && anyZone);
+    this.ui.vignette((anyChasing && anyZone) || pinned);
 
     for (let i = this.coins.length - 1; i >= 0; i--) {
       const c = this.coins[i];
       if (c.update(dt, this.player, PLAYER.coinRange)) {
-        this.nightCoins += c.value;
+        this.dayCoins += c.value;
         this.save.coins += c.value;
         this.ui.setCoins(this.save.coins);
         this.ui.toast(`+${c.value} 🪙`, 'coin');
@@ -625,10 +756,24 @@ class Game {
       }
     }
 
-    if (!this.doorUnlocked && this._nearDoor() && !this.ui.anyOpen()) {
-      this.ui.prompt('PRESS <kbd>E</kbd> TO PICK THE LOCK');
-    } else if (this.player.locked || this.ui.anyOpen()) {
-      this.ui.prompt(null);
+    this._doorPrompt();
+  }
+
+  /** A patron has clocked you and is yelling for security. */
+  _patronShout(patron) {
+    const cfg = this.stats.cfg;
+    if (!this._shoutCooldown) {
+      sfx.alert();
+      this.ui.toast(patron.shout, 'bad');
+      this._shoutCooldown = 1.6;
+      setTimeout(() => { this._shoutCooldown = 0; }, 1600);
+    }
+    // the shout carries: nearby guards drop their patrol and come looking
+    for (const g of this.guards) {
+      if (g.stun > 0) continue;
+      if (Math.hypot(g.pos.x - patron.pos.x, g.pos.z - patron.pos.z) > cfg.patronShout) continue;
+      g.lastSeen = { x: this.player.pos.x, z: this.player.pos.z };
+      if (g.state === 'patrol') { g.state = 'search'; g.stateTime = 0; g.target = g.lastSeen; }
     }
   }
 }

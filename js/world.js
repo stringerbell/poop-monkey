@@ -295,6 +295,17 @@ export class World {
     if (this.lockMesh) this.lockMesh.visible = false;
   }
 
+  /** The janitor has walked you back and put a fresh padlock on it. */
+  closeDoor() {
+    if (!this.doorOpen) return;
+    this.doorOpen = false;
+    if (this.doorCollider && !this.colliders.includes(this.doorCollider)) {
+      this.colliders.push(this.doorCollider);
+    }
+    if (this.lockMesh) this.lockMesh.visible = true;
+    if (this.doorPivot) this.doorPivot.rotation.y = 0;
+  }
+
   _paths() {
     const P = MATS.path;
     const strip = (w, d, x, z, rotY = 0) => {

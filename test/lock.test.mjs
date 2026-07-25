@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installBrowserStubs, fakeCanvas, seeded } from './helpers.mjs';
+import { levelConfig, MAX_LEVEL, MIN_LOCK_WINDOW } from '../js/config.js';
 
 installBrowserStubs();
 const { LockPuzzle, norm, inArc } = await import('../js/lock.js');
 
 const TAU = Math.PI * 2;
-const CFG = { locks: 1, rungs: 3, speed: 2, ramp: 1.5, arc: 0.5, shrink: 0.5, reversals: false, decoys: 0 };
+// Deliberately kept clear of the MIN_LOCK_WINDOW floor so these tests exercise the
+// ramp itself; the floor gets its own test below.
+const CFG = { locks: 1, rungs: 3, speed: 2, ramp: 1.1, window: 0.3, windowShrink: 0.9, reversals: false, decoys: 0 };
 
 function makePuzzle(over = {}) {
   const p = new LockPuzzle(fakeCanvas());
@@ -42,8 +45,8 @@ test('a well-timed press climbs a rung and speeds the lock up', () => {
   hit(p);
   assert.equal(p.rung, 1);
   assert.deepEqual(rungs, [1]);
-  assert.equal(p.speed, CFG.speed * CFG.ramp, 'the bar must accelerate each rung');
-  assert.equal(p.arc, CFG.arc * CFG.shrink, 'the target must shrink each rung');
+  assert.ok(Math.abs(p.speed - CFG.speed * CFG.ramp) < 1e-9, 'the bar must accelerate each rung');
+  assert.ok(Math.abs(p.window - CFG.window * CFG.windowShrink) < 1e-9, 'the window must tighten each rung');
   assert.equal(p.hits.length, 1, 'the successful angle is marked on the ring');
 });
 
@@ -60,7 +63,7 @@ test('a mistimed press resets the whole lock back to the start', () => {
   assert.equal(failedAt, 2, 'onFail reports how far you got');
   assert.equal(p.rung, 0);
   assert.equal(p.speed, CFG.speed, 'speed must return to the level baseline');
-  assert.equal(p.arc, CFG.arc, 'the target must return to full width');
+  assert.equal(p.window, CFG.window, 'the window must return to full width');
   assert.deepEqual(p.hits, [], 'previous marks are wiped');
   assert.ok(p.failTimer > 0, 'a short lockout plays the CLUNK before resuming');
 });
@@ -103,7 +106,7 @@ test('each successive padlock on the same door starts harder', () => {
   hit(p);
   assert.equal(p.lockIndex, 1);
   assert.ok(p.speed > CFG.speed, 'padlock 2 sweeps faster than padlock 1');
-  assert.ok(p.arc < CFG.arc, 'padlock 2 has a tighter target');
+  assert.ok(p.window < CFG.window, 'padlock 2 has a tighter window');
   assert.equal(p.rung, 0, 'rung progress restarts for the new padlock');
 });
 
@@ -154,6 +157,56 @@ test('the bar sweeps at the configured speed and wraps around the ring', () => {
   p.update(3.0);                                // 8 rad total > TAU
   assert.ok(p.angle >= 0 && p.angle < TAU, 'angle stays normalised after wrapping');
   assert.ok(Math.abs(p.angle - norm(8)) < 1e-9);
+});
+
+// The level curve ramps bar speed *and* shrinks the target every rung. Left
+// unchecked those compound into windows of a couple of milliseconds, which is not
+// a timing puzzle any more — it is a slot machine. The clamp is what makes it
+// safe to ramp the difficulty as hard as the curve does.
+test('no rung of any level is narrower than a human reaction', () => {
+  let tightest = Infinity, tightestAt = null;
+
+  for (let level = 1; level <= MAX_LEVEL; level++) {
+    const c = levelConfig(level);
+    const p = new LockPuzzle(fakeCanvas());
+    p.start({
+      locks: c.locks, rungs: c.rungs, speed: c.lockSpeed, ramp: c.lockRamp,
+      window: c.lockWindow, windowShrink: c.windowShrink, reversals: false, decoys: 0,
+    });
+
+    for (let i = 0; i < c.locks * c.rungs && p.active; i++) {
+      assert.ok(p.window >= MIN_LOCK_WINDOW - 1e-9,
+        `level ${level}, tap ${i + 1}: window is ${(p.window * 1000).toFixed(1)}ms, ` +
+        `below the ${(MIN_LOCK_WINDOW * 1000).toFixed(0)}ms floor`);
+      if (p.window < tightest) { tightest = p.window; tightestAt = level; }
+      hit(p);
+    }
+    assert.equal(p.active, false, `level ${level}: the puzzle did not complete in locks*rungs taps`);
+  }
+
+  // and the floor should actually be reached, or the curve is not ramping at all
+  assert.ok(tightest < MIN_LOCK_WINDOW * 1.05,
+    `the curve never gets tight (tightest ${(tightest * 1000).toFixed(0)}ms at level ${tightestAt})`);
+});
+
+test('the opening lock is comfortably wide and the late game is not', () => {
+  const mk = level => {
+    const c = levelConfig(level);
+    const p = new LockPuzzle(fakeCanvas());
+    p.start({
+      locks: c.locks, rungs: c.rungs, speed: c.lockSpeed, ramp: c.lockRamp,
+      window: c.lockWindow, windowShrink: c.windowShrink, reversals: false, decoys: 0,
+    });
+    return p;
+  };
+  const early = mk(1), late = mk(MAX_LEVEL);
+  assert.ok(early.window > 0.25, `level 1 should be forgiving, got ${(early.window * 1000).toFixed(0)}ms`);
+  assert.ok(late.window < early.window * 0.6, 'level 50 should open much tighter than level 1');
+  assert.ok(late.speed >= early.speed * 2, 'the bar should sweep far faster by level 50');
+  // the drawn target must stay legible at both ends of the curve
+  for (const p of [early, late]) {
+    assert.ok(p.arc > 0.25 && p.arc < 1.2, `target arc ${p.arc.toFixed(2)}rad is unreadable`);
+  }
 });
 
 test('stop() freezes the puzzle so a background update cannot advance it', () => {

@@ -1,4 +1,5 @@
 import { sfx } from './audio.js';
+import { MIN_LOCK_WINDOW, MAX_LOCK_SPEED } from './config.js';
 
 const TAU = Math.PI * 2;
 export const norm = a => ((a % TAU) + TAU) % TAU;
@@ -41,11 +42,27 @@ export class LockPuzzle {
 
   stop() { this.active = false; }
 
+  /**
+   * Difficulty lives in `win` — the seconds the bar spends inside the target.
+   * Speed and window are clamped independently, then the drawn arc is derived
+   * from both, so no combination of level curve values can produce a rung that
+   * is physically unhittable or a target too small to see.
+   */
+  _applyDifficulty() {
+    this.win = Math.max(MIN_LOCK_WINDOW, this.win);
+    this.speed = Math.min(MAX_LOCK_SPEED, this.speed);
+    this.arc = this.win * this.speed;
+  }
+
+  /** How long the bar spends inside the current target, in seconds. */
+  get window() { return this.win; }
+
   _resetLock(silent) {
     const c = this.cfg;
     this.rung = 0;
     this.speed = c.speed;
-    this.arc = c.arc;
+    this.win = c.window;
+    this._applyDifficulty();
     this.angle = 0;
     this.dir = 1;
     this.hits = [];
@@ -119,14 +136,16 @@ export class LockPuzzle {
       this._resetLock(true);
       // each successive lock on the same door starts a notch faster
       this.speed = this.cfg.speed * (1 + this.lockIndex * 0.18);
-      this.arc = this.cfg.arc * Math.pow(0.94, this.lockIndex);
+      this.win = this.cfg.window * Math.pow(0.94, this.lockIndex);
+      this._applyDifficulty();
       this._placeTarget(true);
       this._placeDecoys();
       return;
     }
 
     this.speed *= this.cfg.ramp;
-    this.arc = Math.max(0.12, this.arc * this.cfg.shrink);
+    this.win *= this.cfg.windowShrink;
+    this._applyDifficulty();
     if (this.cfg.reversals && Math.random() < 0.32) this.dir *= -1;
     this._placeTarget(false);
     this._placeDecoys();

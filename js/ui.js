@@ -1,4 +1,4 @@
-import { WEAPONS, DISGUISES, UPGRADES, upgradeCost, MAX_LEVEL } from './config.js';
+import { WEAPONS, DISGUISES, UPGRADES, SHOP_TABS, upgradeCost, MAX_LEVEL } from './config.js';
 import { sfx } from './audio.js';
 
 const $ = id => document.getElementById(id);
@@ -11,6 +11,7 @@ export class UI {
       ammo: $('hud-ammo'), ammoBox: document.querySelector('.ammo'),
       ammoMax: document.querySelector('.ammo-max'), ammoIcon: document.querySelector('.ammo .ico'),
       crosshair: $('crosshair'), prompt: $('prompt'), toasts: $('toast-wrap'),
+      crowd: $('crowd'), crowdCount: $('crowd-count'), crowdFill: $('crowd-fill'),
       vignette: $('alert-vignette'), viewmodel: $('viewmodel'), fade: $('fade'),
       shopBody: $('shop-body'), shopCoins: $('shop-coins'),
       sumTitle: $('sum-title'), sumScold: $('sum-scold'), sumStats: $('sum-stats'),
@@ -54,7 +55,23 @@ export class UI {
   // ------------------------------------------------------------ hud
   setLevel(n) { this.el.level.textContent = `LEVEL ${n} / ${MAX_LEVEL}`; }
   setPhase(p) {
-    this.el.phase.textContent = p === 'day' ? '☀️ DAYTIME' : '🌙 NIGHT SHIFT';
+    this.el.phase.textContent = p === 'day' ? '☀️ OPEN TO THE PUBLIC' : '🌙 NIGHT — FORAGE';
+  }
+
+  /**
+   * The public closing in on you.
+   * @param count how many alarmed patrons are within arm's reach
+   * @param need  how many it takes to pin you (0 hides the meter entirely)
+   * @param frac  0..1 progress towards being held
+   */
+  crowd(count, need, frac = 0) {
+    const show = need > 0 && count > 0;
+    this.el.crowd.classList.toggle('hidden', !show);
+    if (!show) return;
+    const pinned = count >= need;
+    this.el.crowd.classList.toggle('pinned', pinned);
+    this.el.crowdCount.textContent = `${count}/${need}`;
+    this.el.crowdFill.style.width = `${Math.min(100, frac * 100)}%`;
   }
   setTimer(sec) {
     const s = Math.max(0, Math.ceil(sec));
@@ -69,12 +86,16 @@ export class UI {
   }
   setHits(n) { this.el.hits.innerHTML = `<span class="ico">🎯</span> ${n}`; }
   setWeapon(name) { this.el.weapon.textContent = name; }
-  setAmmo(n, max, icon) {
+  /**
+   * @param holding whether the monkey has a round in its paw. At night the
+   *        counter is scraps eaten, not ammo — there is nothing to hold yet.
+   */
+  setAmmo(n, max, icon, holding = true) {
     this.el.ammo.textContent = n;
     this.el.ammoMax.textContent = `/${max}`;
     if (icon) this.el.ammoIcon.textContent = icon;
     this.el.ammoBox.classList.toggle('empty', n <= 0);
-    this.el.viewmodel.classList.toggle('empty', n <= 0);
+    this.el.viewmodel.classList.toggle('empty', !holding || n <= 0);
   }
 
   prompt(text) {
@@ -181,11 +202,11 @@ export class UI {
                cls: i === save.weapon ? 'equipped' : owned ? 'owned' : next ? '' : 'locked' });
       });
 
-      for (const key of ['power', 'capacity', 'digest']) this._upgradeCard(card, buyBtn, bar, key);
+      for (const key of SHOP_TABS.weapons) this._upgradeCard(card, buyBtn, bar, key);
     }
 
     if (this.shopTab === 'movement') {
-      for (const key of ['speed', 'stealth']) this._upgradeCard(card, buyBtn, bar, key);
+      for (const key of SHOP_TABS.movement) this._upgradeCard(card, buyBtn, bar, key);
     }
 
     if (this.shopTab === 'cosmetics') {

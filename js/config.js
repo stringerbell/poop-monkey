@@ -1,8 +1,14 @@
 // Tuning constants, level curves, upgrade catalogue and flavour text.
 
 export const MAX_LEVEL = 50;
-export const DAY_SECONDS = 180;    // spec: daytime lasts 3 real minutes
-export const NIGHT_SECONDS = 150;  // night is a little shorter to keep the loop punchy
+
+// A level runs NIGHT first, then DAY.
+//   night — the zoo is shut. Pick the padlock, sneak out, and forage before the
+//           janitor bags the leftovers. Short and frantic; grows with the level.
+//   day   — the zoo is open. Your food is now ammunition, the guards are on shift
+//           and the place is full of patrons who will happily point you out.
+export const DAY_SECONDS = 180;          // spec: daytime lasts 3 real minutes
+export const NIGHT_BASE_SECONDS = 60;    // level 1 night; later levels get longer
 
 export const WORLD = {
   half: 70,          // arena spans -70..70 on X and Z
@@ -22,6 +28,14 @@ export const PLAYER = {
   coinRange: 2.6,
   interactRange: 3.4,
 };
+
+// The lock's difficulty is expressed as a *window* — how long the bar spends
+// inside the target — rather than as a raw arc width. The drawn arc is then
+// derived as window x speed, which keeps the two honest: a faster bar
+// automatically needs a wider target for the same difficulty, so speeding the
+// bar up can never silently make a rung physically unhittable.
+export const MIN_LOCK_WINDOW = 0.09;   // seconds (~5 frames at 60fps)
+export const MAX_LOCK_SPEED = 7;       // rad/s, ~1.1 revolutions per second
 
 // ---------------------------------------------------------------- weapons
 export const WEAPONS = [
@@ -63,6 +77,15 @@ export const UPGRADES = {
               desc: 'Flatter, faster shots and a wider splatter.' },
   digest:   { name: 'Fast Digestion',emoji: '⚡', max: 5, base: 130, step: 1.6,
               desc: 'Each scrap of food converts into more poop.' },
+  slip:     { name: 'Grease Fur',    emoji: '🧴', max: 5, base: 190, step: 1.72,
+              desc: 'Wriggle out of a grabbing crowd before a guard reaches you.' },
+};
+
+// Which upgrades appear under which shop tab. Kept here rather than inline in the
+// shop so it can be checked: every upgrade must be purchasable somewhere.
+export const SHOP_TABS = {
+  weapons:  ['power', 'capacity', 'digest'],
+  movement: ['speed', 'stealth', 'slip'],
 };
 
 export function upgradeCost(key, ownedLevel) {
@@ -76,31 +99,56 @@ export function levelConfig(level) {
 
   return {
     level,
-    // --- lock puzzle
-    locks:      Math.min(5, 1 + Math.floor((level - 1) / 10)),
-    rungs:      Math.min(8, 3 + Math.floor((level - 1) / 7)),   // spec: 3 layers at level 1
-    lockSpeed:  1.5 + t * 2.6,                                   // rad/s at rung 1
-    lockRamp:   1.11 + t * 0.06,                                 // speed multiplier per rung
-    lockArc:    0.55 - t * 0.28,                                 // starting target width (rad)
-    lockShrink: 0.9 - t * 0.06,
-    reversals:  level >= 8,
-    decoys:     level >= 15 ? Math.min(3, 1 + Math.floor((level - 15) / 12)) : 0,
 
-    // --- day / food
+    // --- night length. The padlock alone can eat most of a level-1 night, so the
+    //     clock grows roughly in step with how much lock there is to pick.
+    night:      Math.round(NIGHT_BASE_SECONDS + t * 90),   // 60s -> 150s
+
+    // --- lock puzzle (night). More taps, sooner, and a steeper per-rung ramp.
+    locks:       Math.min(4, 1 + Math.floor((level - 1) / 12)),
+    rungs:       Math.min(8, 3 + Math.floor((level - 1) / 5)),   // spec: 3 layers at level 1
+    lockWindow:  0.30 - t * 0.14,     // seconds inside the target, at rung 1
+    windowShrink: 0.86 - t * 0.06,    // per rung
+    lockSpeed:   1.8 + t * 1.8,       // rad/s at rung 1
+    lockRamp:    1.09 + t * 0.05,     // speed multiplier per rung
+    reversals:   level >= 5,
+    decoys:      level >= 9 ? Math.min(3, 1 + Math.floor((level - 9) / 14)) : 0,
+
+    // --- night / food
     food:       Math.max(7, Math.round(22 - t * 13)),
     foodSpread: 0.55 + t * 0.45,   // higher = pushed further into awkward corners
     foodPoop:   2,
 
-    // --- night / guards
+    // --- night / janitors. Softer than guards: shorter sight, slower, and being
+    //     caught costs you progress rather than the level. Their real threat is
+    //     that they are binning the leftovers while you fumble with the lock.
+    janitors:      Math.min(5, 1 + Math.floor(level / 11)),
+    janitorSpeed:  2.6 + t * 2.2,
+    janitorDetect: 8.5 + t * 6.5,
+    janitorFov:    Math.PI * (0.5 + t * 0.25),
+    janitorCatch:  1.7 + t * 0.5,
+    cleanTime:     Math.max(1.1, 3.6 - t * 2.4),   // seconds to bag one scrap
+    foodLossOnCatch: 0.3,                          // fraction of your haul confiscated
+
+    // --- day / guards
     guards:     Math.min(14, 3 + Math.floor(level / 3.2)),
     guardSpeed: 3.0 + t * 3.4,
     guardTurn:  2.2 + t * 1.8,
     detect:     13 + t * 13,       // radius at which a guard spots you
     attack:     5.5 + t * 5.0,     // the "attack zone" — inside it they close in fast
-    taze:       1.9 + t * 0.9,     // contact radius that ends your night
+    taze:       1.9 + t * 0.9,     // contact radius that ends the level
     guardFov:   Math.PI * (0.62 + t * 0.30),
     stunTime:   Math.max(2.2, 5.0 - t * 2.6),
     coinValue:  12 + Math.round(level * 1.6),
+
+    // --- day / patrons
+    patrons:      Math.min(24, 7 + Math.round(t * 17)),
+    patronSpeed:  1.7 + t * 1.4,
+    patronAlert:  9 + t * 7,       // range at which a patron notices a loose monkey
+    patronFov:    Math.PI * (0.7 + t * 0.3),
+    patronShout:  16 + t * 12,     // how far their shouting carries to a guard
+    crowdSize:    3 - Math.round(t),  // patrons needed to pin you: 3 early, 2 late
+    crowdRadius:  3.2 + t * 1.3,
   };
 }
 
@@ -111,6 +159,8 @@ export function derive(save) {
   const w = WEAPONS[save.weapon] || WEAPONS[0];
   const power = save.upgrades.power || 0;
 
+  const slip = save.upgrades.slip || 0;
+  const slipT = slip / UPGRADES.slip.max;   // exact 1 at max, so grabSpeed lands on 1
   const attackMul = dis.attack;
   // Stacked stealth can otherwise shrink the spotted-range below the attack ring,
   // which makes the red circle on the ground a lie — you'd get grabbed from
@@ -131,6 +181,11 @@ export function derive(save) {
     cooldown: w.cooldown * (1 - power * 0.05),
     splash: w.splash * (1 + power * 0.1),
     detectMul, attackMul,
+
+    // Crowd handling. At Grease Fur 0 a crowd pins you almost instantly and you
+    // can barely shuffle; fully greased you keep full speed and walk out of it.
+    grabLimit: 1.5 + slip * 0.85,
+    grabSpeed: slipT >= 1 ? 1 : 0.12 + slipT * 0.88,
   };
 }
 
@@ -169,19 +224,54 @@ const SCOLDINGS = {
 };
 
 const ESCAPED = [
-  { who: 'Keeper Dale (over the radio)', text: 'It went back in on its own. It went back in ON ITS OWN. That is somehow the most disrespectful part of the entire evening.' },
-  { who: 'Night Supervisor Brenda', text: 'Nobody caught it. It simply got bored of us and went to bed. Log it. Log all of it. I will be in the van.' },
+  { who: 'Keeper Dale (over the radio)', text: 'It went back in on its own. It went back in ON ITS OWN. That is somehow the most disrespectful part of the entire day.' },
+  { who: 'Night Supervisor Brenda', text: 'Nobody caught it. It simply got bored of us and went home to bed. Log it. Log all of it. I will be in the van.' },
 ];
 
-export function scolding(hits, caught, rng = Math.random) {
-  const pool = !caught
-    ? ESCAPED
-    : hits === 0 ? SCOLDINGS.none
+// Held by the public until somebody official turned up. Different humiliation.
+const CROWDED = [
+  { who: 'A man in a bucket hat', text: 'I have got him! I have got the monkey! Everyone, form the ring again, form the RING — Deborah, film it, film it properly, not the floor —' },
+  { who: 'A school trip, in unison', text: 'MISS. MISS. MISS. MISS. MISS. MISS. MISS.' },
+  { who: 'Keeper Dale, arriving late', text: 'Would everyone please stop holding the animal. Sir. SIR. That is a wild animal and you are holding it like a marrow at a village show.' },
+  { who: 'A woman with a pushchair', text: 'I have watched a lot of nature documentaries and I want you to know that I knew exactly what to do, and what I did was scream and put my arms out.' },
+];
+
+// Short, softer, night-time. The janitor is an obstacle, not a boss.
+export const JANITOR_LINES = [
+  { who: 'Janitor Ron', text: 'Nope. Back you go. I have got eleven bins left and I am not doing them twice.' },
+  { who: 'Janitor Ron', text: 'You are not even hiding. You are just standing in the open being brown.' },
+  { who: 'Janitor Ron', text: 'Every night. Every single night. Go on, in.' },
+  { who: 'Janitor Ron', text: 'I do not get paid enough to care, but I do get paid enough to do THIS.' },
+  { who: 'Janitor Ron', text: 'Mate. Mate. It is a bin bag. There is nothing in it for you but disappointment and cutlery.' },
+];
+
+export const PATRON_SHOUTS = [
+  'THERE! THERE IT IS!',
+  'IS THAT MEANT TO BE OUT?',
+  'SECURITY! SECURITY!',
+  'MUM, THE MONKEY IS LOOSE!',
+  'GET A PHOTO, GET A PHOTO!',
+  'IT IS COMING RIGHT AT US!',
+  'SOMEBODY DO A SOMETHING!',
+];
+
+/**
+ * @param cause 'guard' | 'crowd' | null (null = you survived to closing time)
+ */
+export function scolding(hits, cause, rng = Math.random) {
+  if (!cause) return ESCAPED[Math.floor(rng() * ESCAPED.length)];
+  if (cause === 'crowd') return CROWDED[Math.floor(rng() * CROWDED.length)];
+  const pool =
+      hits === 0 ? SCOLDINGS.none
     : hits <= 2 ? SCOLDINGS.low
     : hits <= 6 ? SCOLDINGS.mid
     : hits <= 12 ? SCOLDINGS.high
     : SCOLDINGS.legend;
   return pool[Math.floor(rng() * pool.length)];
+}
+
+export function janitorLine(rng = Math.random) {
+  return JANITOR_LINES[Math.floor(rng() * JANITOR_LINES.length)];
 }
 
 export const FOOD_TYPES = [
