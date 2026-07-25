@@ -68,16 +68,18 @@ the game itself always loads three.js from the CDN and has no runtime dependenci
 ## Publishing to GitHub Pages
 
 ```bash
-git remote add origin git@github.com:<you>/poop-monkey.git
-git push -u origin main
+make deploy
 ```
 
-Then in the repo's **Settings → Pages**, set **Source** to **GitHub Actions**. The included
-[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) publishes the repo root on every
-push to `main`.
+That runs the checks, pushes `main`, waits for the Actions run, and prints the live URL.
 
-Prefer the `gh-pages` branch instead? Set **Source** to *Deploy from a branch* → `main` → `/ (root)`.
-Everything uses relative paths, so it works fine from a `/<repo>/` sub-path either way.
+Publishing is handled by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
+which fires on every push to `main`. It passes `enablement: true` to
+`actions/configure-pages`, so it switches Pages on for the repository itself — there is
+no Settings page to visit first. The whole repo root is published as-is; there is no
+build step. Everything uses relative paths, so it works from a `/<repo>/` sub-path.
+
+`make pages-status` prints the live URL and the current deployment state.
 
 ## Layout
 
