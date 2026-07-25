@@ -10,11 +10,16 @@ You are not alone: **Janitor Ron** is doing his rounds with a litter picker, bin
 scraps you are after. He is short-sighted and slow, but if he collars you he walks you back
 to the cage, fits a fresh padlock, and confiscates a third of your haul.
 
-**Day (3:00)** — the gates open and last night's dinner is now ammunition. Splatter the
+**Day (1:45, also growing)** — the gates open and last night's dinner is now ammunition. Splatter the
 guards, dodge their taser zones, and hoover up the coins they drop. The zoo is full of
 **patrons** who will point, shout for security, and — if enough of them get around you —
 hold you there until a guard arrives. A guard ends your day outright; a crowd is survivable
-once you have bought some Grease Fur.
+once you have bought some Grease Fur. A guest who takes a round to the face is silenced for
+the rest of the day — no score and no coin, but no shouting either.
+
+Either phase can be handed in early: walk back into your cage and press `E`. Ending the day
+that way still counts as getting away with it, so it is a real way to bank a good haul
+instead of pushing your luck.
 
 Spend your coins in the gift shop on speed, stealth, crowd-slipping, disguises, and launcher
 upgrades — all the way from your bare arm to the R.P.P. (Rocket Propelled Poop).
@@ -28,7 +33,7 @@ Clear all **50 levels** to win.
 | `Shift` | Sprint |
 | Mouse | Look (click to capture, `Esc` to release) |
 | Left click | Throw poop (daytime) |
-| `E` | Pick the cage lock (stand at the door, night) |
+| `E` | Pick the cage lock at the door &middot; or end the phase early from inside your cage |
 | `Space` / click | Time your hit in the lock puzzle |
 | `B` | Gift shop (daytime only) |
 

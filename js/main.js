@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {
-  MAX_LEVEL, DAY_SECONDS, WORLD, PLAYER,
+  MAX_LEVEL, WORLD, PLAYER,
   WEAPONS, DISGUISES, UPGRADES, upgradeCost, derive, scolding, janitorLine,
 } from './config.js';
 import * as Save from './save.js';
@@ -259,6 +259,7 @@ class Game {
     const cfg = this.stats.cfg;
     this.state = 'night';
     this.timer = cfg.night;
+    this.leftCage = false;
     this.world.setPhase('night');
     this.player.teleport(C.x, C.z - 3, Math.PI); // facing the door end of the cage
     this.player.enabled = true;
@@ -317,8 +318,9 @@ class Game {
     this._spawnPatrons();
 
     this.state = 'day';
-    this.timer = DAY_SECONDS;
+    this.timer = this.stats.cfg.day;
     this.grabT = 0;
+    this.leftCage = false;
     this.ui.setPhase('day');
     this.ui.setAmmo(this.ammo, this.stats.capacity, '💩');
     this.ui.fadeCaption('');
@@ -332,9 +334,14 @@ class Game {
     setTimeout(() => this.ui.toast('Patrons will shout for the guards. Do not let them ring you in.', 'bad'), 1800);
   }
 
-  /** @param cause 'guard' | 'crowd' | null — null means you lasted to closing time. */
+  /**
+   * @param cause 'guard' | 'crowd' end the day badly; 'early' means you walked
+   *        back into the cage yourself; null means you lasted to closing time.
+   *        The last two both count as getting away with it.
+   */
   async _endDay(cause, by) {
     if (this.state !== 'day') return;
+    const caught = cause === 'guard' || cause === 'crowd';
     this.state = 'transition';
     this._dismissOverlays();
     this.player.enabled = false;
@@ -343,8 +350,8 @@ class Game {
     this.ui.crowd(0, 0);
     this.ui.prompt(null);
 
-    if (cause) sfx.taze();
-    this.ui.fadeCaption(cause ? 'CAUGHT' : 'CLOSING TIME');
+    if (caught) sfx.taze();
+    this.ui.fadeCaption(caught ? 'CAUGHT' : cause === 'early' ? 'BACK INSIDE' : 'CLOSING TIME');
     this.ui.fade(true);
     await sleep(1600);
 
@@ -353,9 +360,9 @@ class Game {
     this.player.teleport(C.x, C.z - 3, Math.PI); // facing the door end of the cage
     this._clearActors();
 
-    const rng = makeRng(this.save.level * 31 + this.hits * 7 + (cause ? 3 : 0));
-    const scold = scolding(this.hits, cause, rng);
-    const bonus = cause ? 0 : Math.round(40 + this.save.level * 4);
+    const rng = makeRng(this.save.level * 31 + this.hits * 7 + (caught ? 3 : 0));
+    const scold = scolding(this.hits, caught ? cause : null, rng);
+    const bonus = caught ? 0 : Math.round(40 + this.save.level * 4);
 
     this.save.coins += bonus;
     this.save.totalHits += this.hits;
@@ -367,6 +374,7 @@ class Game {
 
     const title = cause === 'guard' ? `TAZED BY ${by?.name || 'A GUARD'}`
       : cause === 'crowd' ? 'PINNED BY THE PUBLIC'
+      : cause === 'early' ? 'YOU LET YOURSELF BACK IN'
       : 'YOU LASTED TO CLOSING TIME';
 
     this.ui.fade(false);
@@ -375,7 +383,7 @@ class Game {
     this.ui.showSummary({
       title,
       scold,
-      calm: !cause,
+      calm: !caught,
       stats: [
         { k: 'Guards hit', v: this.hits },
         { k: 'Scraps eaten', v: this.eaten },
@@ -438,6 +446,8 @@ class Game {
     for (const s of spots) {
       if (picked.length >= cfg.food) break;
       if (picked.some(p => Math.hypot(p.x - s.x, p.z - s.z) < 6)) continue;
+      // never place a scrap nobody can physically get to
+      if (!this.world.reachable(s.x, s.z, PLAYER.pickupRange)) continue;
       picked.push(s);
     }
     for (const s of picked) this.food.push(new FoodItem(this.world, s, rng));
@@ -482,6 +492,10 @@ class Game {
   _interact() {
     if (this.state !== 'day' && this.state !== 'night') return;
     if (this.ui.anyOpen()) return;
+
+    // been out and come back? then E hands the phase in early
+    if (this._canFinishEarly()) return this._finishEarly();
+
     if (this.doorUnlocked) return;
     if (!this._nearDoor()) return;
     this._openLock();
@@ -492,6 +506,26 @@ class Game {
     const dx = this.player.pos.x - C.x;
     const dz = this.player.pos.z - (C.z + C.d / 2);
     return Math.hypot(dx, dz) < PLAYER.interactRange;
+  }
+
+  _insideCage() {
+    const C = WORLD.cage;
+    return Math.abs(this.player.pos.x - C.x) < C.w / 2 - 0.5
+        && Math.abs(this.player.pos.z - C.z) < C.d / 2 - 0.5;
+  }
+
+  /** Only offered once you have actually been outside — not on the spawn frame. */
+  _canFinishEarly() {
+    return this.leftCage && this._insideCage();
+  }
+
+  _finishEarly() {
+    if (this.state === 'night') {
+      this.ui.toast('You turn in early, pockets full.', 'good');
+      this._beginDay();
+    } else if (this.state === 'day') {
+      this._endDay('early', null);
+    }
   }
 
   _openLock() {
@@ -570,19 +604,32 @@ class Game {
     });
   }
 
-  _onSplat(hitGuards, shot, direct) {
-    if (!hitGuards.length) { sfx.splat(); return; }
+  _onSplat(targets, shot, direct) {
+    if (!targets.length) { sfx.splat(); return; }
     if (this.stats.splash > 2) sfx.boom(); else sfx.splat();
 
-    for (const g of hitGuards) {
+    const guards = targets.filter(t => t.kind === 'guard');
+    const patrons = targets.filter(t => t.kind === 'patron');
+
+    for (const g of guards) {
       g.splat();
       this.hits++;
       const value = this.stats.cfg.coinValue;
       this.coins.push(new Coin(this.world, g.pos.x + (Math.random() - 0.5) * 1.5, g.pos.z + (Math.random() - 0.5) * 1.5, value));
     }
-    this.ui.setHits(this.hits);
-    const n = hitGuards.length;
-    this.ui.toast(n > 1 ? `${n} GUARDS SPLATTERED!` : `DIRECT HIT — ${hitGuards[0].name}!`, 'good');
+    // Patrons are worth no score and no coin — hitting one only buys silence.
+    for (const p of patrons) p.splat();
+
+    if (guards.length) {
+      this.ui.setHits(this.hits);
+      this.ui.toast(guards.length > 1
+        ? `${guards.length} GUARDS SPLATTERED!`
+        : `DIRECT HIT — ${guards[0].name}!`, 'good');
+    } else if (patrons.length) {
+      this.ui.toast(patrons.length > 1
+        ? `${patrons.length} witnesses silenced.`
+        : 'Witness silenced. No coins, but no shouting either.', 'good');
+    }
   }
 
   // ================================================================ loop
@@ -633,7 +680,9 @@ class Game {
     if (this.state === 'day') this._updateDay(dt);
     if (this.state === 'night') this._updateNight(dt);
 
-    this.projectiles.update(dt, this.guards, (hits, shot, direct) => this._onSplat(hits, shot, direct));
+    // guards score, patrons only get silenced — both are hittable
+    const targets = this.state === 'day' ? [...this.guards, ...this.patrons] : this.guards;
+    this.projectiles.update(dt, targets, (hits, shot, direct) => this._onSplat(hits, shot, direct));
 
     this.renderer.render(this.scene, this.camera);
   }
@@ -705,9 +754,17 @@ class Game {
   }
 
   _doorPrompt() {
-    if (!this.doorUnlocked && this._nearDoor() && !this.ui.anyOpen()) {
+    if (!this._insideCage()) this.leftCage = true;
+
+    if (this.ui.anyOpen()) { this.ui.prompt(null); return; }
+
+    if (this._canFinishEarly()) {
+      this.ui.prompt(this.state === 'night'
+        ? 'PRESS <kbd>E</kbd> TO TURN IN EARLY &mdash; START THE DAY'
+        : 'PRESS <kbd>E</kbd> TO CALL IT A DAY &mdash; BANK YOUR TAKINGS');
+    } else if (!this.doorUnlocked && this._nearDoor()) {
       this.ui.prompt('PRESS <kbd>E</kbd> TO PICK THE LOCK');
-    } else if (this.player.locked || this.ui.anyOpen()) {
+    } else if (this.player.locked) {
       this.ui.prompt(null);
     }
   }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MAX_LEVEL, levelConfig, upgradeCost, derive, scolding, janitorLine,
-  WEAPONS, DISGUISES, UPGRADES, SHOP_TABS, NIGHT_BASE_SECONDS, DAY_SECONDS,
+  WEAPONS, DISGUISES, UPGRADES, SHOP_TABS, NIGHT_BASE_SECONDS, DAY_BASE_SECONDS,
 } from '../js/config.js';
 import { defaultSave } from '../js/save.js';
 import { seeded } from './helpers.mjs';
@@ -17,15 +17,20 @@ test('level 1 matches the designed opening', () => {
   assert.equal(c.reversals, false);
   assert.equal(c.night, NIGHT_BASE_SECONDS, 'the first night is one minute');
   assert.equal(NIGHT_BASE_SECONDS, 60);
-  assert.equal(DAY_SECONDS, 180);
+  assert.equal(c.day, DAY_BASE_SECONDS);
 });
 
-test('the night grows as the padlock gets longer to pick', () => {
+test('both phases grow with the level and stay briskly paced', () => {
   for (let i = 2; i <= MAX_LEVEL; i++) {
     assert.ok(levelConfig(i).night >= levelConfig(i - 1).night, `night shrank at level ${i}`);
+    assert.ok(levelConfig(i).day >= levelConfig(i - 1).day, `day shrank at level ${i}`);
   }
   assert.ok(levelConfig(MAX_LEVEL).night > NIGHT_BASE_SECONDS * 2,
     'the last night should be meaningfully longer than the first');
+  for (const c of levels) {
+    assert.ok(c.day <= 150, `level ${c.level}: a ${c.day}s day drags`);
+    assert.ok(c.day > c.night * 0.9, `level ${c.level}: the day should not be shorter than the night`);
+  }
 });
 
 // The user asked for more taps and a quicker ramp than the original curve.

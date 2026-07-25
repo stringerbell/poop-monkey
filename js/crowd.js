@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PATRON_SHOUTS } from './config.js';
+import { PATRON_SHOUTS, JANITOR_REACH } from './config.js';
 
 // Night shift: one man, a litter picker, and a grim sense of duty.
 // Day shift: the paying public, who are worse.
@@ -62,6 +62,8 @@ export class Janitor {
     this.targetFood = null;
     this.wander = null;
     this.cooldown = 0;          // after nabbing you he loses interest briefly
+    this.stuckT = 0;            // how long he has failed to close on his target
+    this.bestFd = Infinity;
 
     this.group = new THREE.Group();
     this.parts = buildBody(this.group, {
@@ -114,13 +116,26 @@ export class Janitor {
   _pickFood(food) {
     let best = null, bestD = Infinity;
     for (const f of food) {
-      if (f.eaten || f.claimedBy && f.claimedBy !== this) continue;
+      if (f.eaten || f.unreachable) continue;
+      if (f.claimedBy && f.claimedBy !== this) continue;
       const d = Math.hypot(f.pos.x - this.pos.x, f.pos.z - this.pos.z);
       if (d < bestD) { bestD = d; best = f; }
     }
     if (this.targetFood) this.targetFood.claimedBy = null;
     this.targetFood = best;
     if (best) best.claimedBy = this;
+    this.stuckT = 0;
+    this.bestFd = Infinity;
+  }
+
+  /** Give up on a scrap he cannot physically get to, rather than standing in a wall. */
+  _abandonTarget() {
+    if (!this.targetFood) return;
+    this.targetFood.unreachable = true;
+    this.targetFood.claimedBy = null;
+    this.targetFood = null;
+    this.stuckT = 0;
+    this.bestFd = Infinity;
   }
 
   update(dt, player, food, onCatch, onBag) {
@@ -168,7 +183,7 @@ export class Janitor {
       if (this.targetFood) {
         const fx = this.targetFood.pos.x - this.pos.x, fz = this.targetFood.pos.z - this.pos.z;
         const fd = Math.hypot(fx, fz);
-        if (fd < 1.3) {
+        if (fd < JANITOR_REACH) {
           this.state = 'clean';
           this.cleanProgress += dt;
           aimX = fx; aimZ = fz;
@@ -183,6 +198,11 @@ export class Janitor {
           this.cleanProgress = 0;
           speed = this.cfg.janitorSpeed;
           aimX = fx; aimZ = fz;
+
+          // Watchdog: if he stops closing on it, it is behind something solid.
+          // Without this one bad target parks a janitor in a wall all night.
+          if (fd < this.bestFd - 0.2) { this.bestFd = fd; this.stuckT = 0; }
+          else { this.stuckT += dt; if (this.stuckT > 3.5) this._abandonTarget(); }
         }
       } else {
         // nothing left to bag — potter about
@@ -263,6 +283,7 @@ export class Patron {
   constructor(world, cfg, index, spawn) {
     this.world = world;
     this.cfg = cfg;
+    this.kind = 'patron';
     this.pos = new THREE.Vector3(spawn.x, 0, spawn.z);
     this.facing = Math.random() * Math.PI * 2;
     this.state = 'stroll';      // stroll | spotted | mob
@@ -270,6 +291,11 @@ export class Patron {
     this.walk = Math.random() * 10;
     this.wander = null;
     this.shout = PATRON_SHOUTS[index % PATRON_SHOUTS.length];
+    // `stun` is what the projectile system reads to skip spent targets. A
+    // splattered patron is done for the day, so it never counts down.
+    this.stun = 0;
+    this.silenced = false;
+    this.name = 'a guest';
 
     const kid = Math.random() < 0.3;
     this.group = new THREE.Group();
@@ -306,8 +332,36 @@ export class Patron {
     world.root.add(this.group);
   }
 
+  /**
+   * Took one in the face. They will not be telling anybody anything — they are
+   * too busy with their own evening. Silencing a witness costs a round and
+   * scores nothing; that trade-off is the point.
+   */
+  splat() {
+    if (this.silenced) return;
+    this.silenced = true;
+    this.stun = Infinity;
+    this.state = 'stroll';
+    const dirty = new THREE.MeshLambertMaterial({ color: 0x6b4a24 });
+    this.parts.torso.material = dirty;
+    this.parts.head.material = dirty;
+    this.parts.armL.material = dirty;
+    this.pointArm.visible = false;
+    this.bang.visible = false;
+    this.parts.armR.visible = true;
+  }
+
   update(dt, player, onShout) {
     this.stateTime += dt;
+
+    if (this.silenced) {
+      // stood there dripping, contributing nothing to society
+      this.parts.legL.rotation.x = 0;
+      this.parts.legR.rotation.x = 0;
+      this.group.position.set(this.pos.x, 0, this.pos.z);
+      return { dist: Math.hypot(player.pos.x - this.pos.x, player.pos.z - this.pos.z), alarmed: false };
+    }
+
     const dx = player.pos.x - this.pos.x, dz = player.pos.z - this.pos.z;
     const dist = Math.hypot(dx, dz);
 
@@ -403,7 +457,7 @@ export class Patron {
 export function crowdPressure(patrons, player, cfg) {
   let count = 0;
   for (const p of patrons) {
-    if (p.state === 'stroll') continue;
+    if (p.silenced || p.state === 'stroll') continue;
     if (Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z) <= cfg.crowdRadius) count++;
   }
   return { count, pinned: count >= cfg.crowdSize };

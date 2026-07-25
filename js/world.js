@@ -170,6 +170,34 @@ export class World {
     return true;
   }
 
+  /** Could a body of radius `r` stand here without being pushed out? */
+  standable(x, z, r = WORLD.playerRadius) {
+    const lim = WORLD.half - 1.2;
+    if (Math.abs(x) > lim || Math.abs(z) > lim) return false;
+    for (const c of this.colliders) {
+      if (Math.abs(x - c.x) < c.hx + r && Math.abs(z - c.z) < c.hz + r) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Can anything actually collect an item here?
+   *
+   * Props are solid, so a point at the centre of a picnic table is inside a
+   * collider that also covers both benches — you get shoved further away than
+   * your arm can reach and the scrap sits there forever. Anything that places
+   * pickups must check this.
+   */
+  reachable(x, z, reach, r = WORLD.playerRadius) {
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      // stand just inside the reach limit, so a hair of slack is required
+      const d = reach * 0.92;
+      if (this.standable(x + Math.cos(a) * d, z + Math.sin(a) * d, r)) return true;
+    }
+    return false;
+  }
+
   // ------------------------------------------------------------ pieces
   _ground() {
     const g = new THREE.Mesh(new THREE.PlaneGeometry(WORLD.half * 2, WORLD.half * 2), MATS.grass);
@@ -410,7 +438,12 @@ export class World {
     }
     this.root.add(g);
     this.addCollider(x, z, 1.7, 1.5, rotY, 1.05);
-    return { x, y: 1.15, z };
+
+    // Leftovers go at the *end* of the table top, not the middle. The collider
+    // spans the benches as well, so a scrap in the centre is out of arm's reach
+    // from every side. Local +x maps to (cos, -sin) once the group is rotated.
+    const off = 1.2;
+    return { x: x + Math.cos(rotY) * off, y: 1.15, z: z - Math.sin(rotY) * off };
   }
 
   _scatter(rng) {

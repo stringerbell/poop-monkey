@@ -7,8 +7,10 @@ export const MAX_LEVEL = 50;
 //           janitor bags the leftovers. Short and frantic; grows with the level.
 //   day   — the zoo is open. Your food is now ammunition, the guards are on shift
 //           and the place is full of patrons who will happily point you out.
-export const DAY_SECONDS = 180;          // spec: daytime lasts 3 real minutes
-export const NIGHT_BASE_SECONDS = 60;    // level 1 night; later levels get longer
+// Both phases start short and grow with the level. You can also hand either one
+// back early by returning to your cage, so these are ceilings, not sentences.
+export const NIGHT_BASE_SECONDS = 60;
+export const DAY_BASE_SECONDS = 105;
 
 export const WORLD = {
   half: 70,          // arena spans -70..70 on X and Z
@@ -24,10 +26,15 @@ export const PLAYER = {
   accel: 42,
   friction: 12,
   lookSens: 0.0022,
-  pickupRange: 1.9,
+  pickupRange: 2.2,
   coinRange: 2.6,
   interactRange: 3.4,
 };
+
+// How close the janitor must get to bag a scrap. Kept above the player's own
+// reach so he can always work anything the player could have taken — otherwise
+// he walks at an out-of-range scrap and never gives up on it.
+export const JANITOR_REACH = 2.6;
 
 // The lock's difficulty is expressed as a *window* — how long the bar spends
 // inside the target — rather than as a raw arc width. The drawn arc is then
@@ -103,6 +110,7 @@ export function levelConfig(level) {
     // --- night length. The padlock alone can eat most of a level-1 night, so the
     //     clock grows roughly in step with how much lock there is to pick.
     night:      Math.round(NIGHT_BASE_SECONDS + t * 90),   // 60s -> 150s
+    day:        Math.round(DAY_BASE_SECONDS + t * 45),     // 105s -> 150s
 
     // --- lock puzzle (night). More taps, sooner, and a steeper per-rung ramp.
     locks:       Math.min(4, 1 + Math.floor((level - 1) / 12)),

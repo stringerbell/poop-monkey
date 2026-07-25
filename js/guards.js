@@ -18,6 +18,7 @@ export class Guard {
   constructor(world, cfg, index, spawn) {
     this.world = world;
     this.cfg = cfg;
+    this.kind = 'guard';
     this.name = GUARD_NAMES[index % GUARD_NAMES.length];
     this.pos = new THREE.Vector3(spawn.x, 0, spawn.z);
     this.facing = Math.random() * Math.PI * 2;
@@ -59,16 +60,6 @@ export class Guard {
     this.head = add(new THREE.BoxGeometry(0.36, 0.36, 0.34), M.skin, 0, 1.78, 0);
     add(new THREE.BoxGeometry(0.4, 0.1, 0.38), M.cap, 0, 1.98, 0);
     add(new THREE.BoxGeometry(0.4, 0.06, 0.18), M.cap, 0, 1.94, -0.24);
-
-    // torch beam (cheap cone, no extra light)
-    const cone = new THREE.Mesh(
-      new THREE.ConeGeometry(2.6, 12, 12, 1, true),
-      new THREE.MeshBasicMaterial({ color: 0xffe6a8, transparent: true, opacity: 0.11, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending })
-    );
-    cone.rotation.x = Math.PI / 2;
-    cone.position.set(0, 1.5, -6.2);
-    this.torch = cone;
-    g.add(cone);
 
     // attack-zone footprint
     const r = this.cfg.attack;
@@ -218,7 +209,6 @@ export class Guard {
     else this.group.rotation.z = 0;
 
     this.bulb.visible = this.state === 'chase';
-    this.torch.visible = this.stun <= 0;
     const inZone = dist < attackR;
     this.zone.material.opacity = this.stun > 0 ? 0.05
       : inZone ? 0.42 + Math.sin(performance.now() * 0.012) * 0.18
