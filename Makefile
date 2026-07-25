@@ -1,12 +1,13 @@
 PORT ?= 8123
 
-.PHONY: help test test-unit check serve deploy pages-status
+.PHONY: help test test-unit check serve deploy pages-enable pages-status
 
 help:
 	@echo "make test         run the unit tests"
 	@echo "make check        syntax-check every game module"
 	@echo "make serve        serve the game at http://localhost:$(PORT)"
 	@echo "make deploy       push main and publish to GitHub Pages"
+	@echo "make pages-enable one-time: switch Pages on (needs repo admin)"
 	@echo "make pages-status show the live URL and the last deploy"
 
 test: test-unit
@@ -35,6 +36,12 @@ deploy: check test-unit
 	@echo "waiting for the Pages deploy..."
 	@gh run watch $$(gh run list --workflow=deploy.yml --branch=main --limit=1 --json databaseId -q '.[0].databaseId') --exit-status
 	@$(MAKE) --no-print-directory pages-status
+
+# One-off, and only works for an account with admin on the repo: the workflow's
+# own token is never allowed to create a Pages site.
+pages-enable:
+	gh api -X POST repos/{owner}/{repo}/pages -f build_type=workflow \
+		&& echo "Pages enabled — now run 'make deploy'"
 
 pages-status:
 	@gh api repos/{owner}/{repo}/pages -q '"live: \(.html_url)   source: \(.build_type)   status: \(.status)"' 2>/dev/null \

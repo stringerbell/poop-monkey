@@ -67,19 +67,32 @@ the game itself always loads three.js from the CDN and has no runtime dependenci
 
 ## Publishing to GitHub Pages
 
+**One-time setup** (needs repo admin — a workflow token cannot do this for you):
+
+> **Settings → Pages → Source → GitHub Actions**
+
+or, if your `gh` CLI is signed in as an account with admin on the repo:
+
+```bash
+make pages-enable
+```
+
+**Every deploy after that:**
+
 ```bash
 make deploy
 ```
 
 That runs the checks, pushes `main`, waits for the Actions run, and prints the live URL.
-
-Publishing is handled by [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml),
-which fires on every push to `main`. It passes `enablement: true` to
-`actions/configure-pages`, so it switches Pages on for the repository itself — there is
-no Settings page to visit first. The whole repo root is published as-is; there is no
-build step. Everything uses relative paths, so it works from a `/<repo>/` sub-path.
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) fires on every push to
+`main` and publishes the repo root as-is — there is no build step. Everything uses
+relative paths, so it works from a `/<repo>/` sub-path.
 
 `make pages-status` prints the live URL and the current deployment state.
+
+Prefer no workflow at all? **Settings → Pages → Source → Deploy from a branch → `main` →
+`/ (root)`** also works, because the site is plain static files and `.nojekyll` stops
+Jekyll touching them.
 
 ## Layout
 

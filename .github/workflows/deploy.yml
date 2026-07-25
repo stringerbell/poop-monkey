@@ -22,11 +22,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Needs Pages already switched on with Source = GitHub Actions. The job's
+      # GITHUB_TOKEN cannot create the Pages site itself — that takes repo admin,
+      # which no workflow token has — so `enablement: true` only trades one error
+      # for a more confusing one. See "Publishing" in the README for the one-off.
       - uses: actions/configure-pages@v5
-        with:
-          # Turn Pages on for the repo if it is not already, so a fresh clone
-          # deploys without anyone having to visit Settings first.
-          enablement: true
       # The site is plain static files — no build step needed.
       - uses: actions/upload-pages-artifact@v3
         with:
