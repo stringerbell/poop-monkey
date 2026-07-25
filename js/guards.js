@@ -219,23 +219,16 @@ export class Guard {
   }
 
   _move(sx, sz) {
-    const r = 0.55;
     this.pos.x += sx;
-    this._resolve('x', r);
     this.pos.z += sz;
-    this._resolve('z', r);
-  }
-
-  _resolve(axis, r) {
-    for (const c of this.world.colliders) {
-      const dx = this.pos.x - c.x, dz = this.pos.z - c.z;
-      const ox = c.hx + r - Math.abs(dx), oz = c.hz + r - Math.abs(dz);
-      if (ox <= 0 || oz <= 0) continue;
-      if (axis === 'x') this.pos.x += dx >= 0 ? ox : -ox;
-      else this.pos.z += dz >= 0 ? oz : -oz;
-      // bumping a wall while patrolling? pick a new destination
-      if (this.state === 'patrol' || this.state === 'search') this.target = null;
+    const hit = { x: false, z: false };
+    if (!this.world.resolveCircle(this.pos, 0.55, hit) && this.safe) {
+      this.pos.x = this.safe.x; this.pos.z = this.safe.z;
+    } else if (!hit.x && !hit.z) {
+      this.safe = { x: this.pos.x, z: this.pos.z };
     }
+    // bumping a wall while patrolling? pick a new destination
+    if ((hit.x || hit.z) && (this.state === 'patrol' || this.state === 'search')) this.target = null;
   }
 
   dispose() {

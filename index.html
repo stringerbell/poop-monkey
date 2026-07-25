@@ -91,7 +91,13 @@
 
   <div id="lock" class="overlay">
     <div class="panel lock-panel">
-      <h2 id="lock-title">CAGE LOCK 1 / 1</h2>
+      <div class="lock-head">
+        <h2 id="lock-title">CAGE LOCK 1 / 1</h2>
+        <div class="lock-clock">
+          <span class="lock-clock-label">TIME LEFT</span>
+          <span id="lock-timer">1:00</span>
+        </div>
+      </div>
       <canvas id="lock-canvas" width="420" height="420"></canvas>
       <div id="lock-status">Hit <kbd>SPACE</kbd> or click when the bar is in the green.</div>
       <div id="lock-pips" class="pips"></div>

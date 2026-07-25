@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FOOD_TYPES } from './config.js';
+import { World } from './world.js';
 
 export const HIT_R = 0.85;    // guard hit cylinder radius
 export const MAX_STEP = 0.25; // longest distance a shot may advance between collision checks
@@ -66,8 +67,7 @@ export class ProjectileSystem {
         else if (Math.abs(s.pos.x) > 69 || Math.abs(s.pos.z) > 69) hitWorld = true;
         else {
           for (const c of this.world.colliders) {
-            if (s.pos.y < (c.top ?? 12) &&
-                Math.abs(s.pos.x - c.x) < c.hx && Math.abs(s.pos.z - c.z) < c.hz) { hitWorld = true; break; }
+            if (s.pos.y < (c.top ?? 12) && World.overlaps(c, s.pos.x, s.pos.z, 0)) { hitWorld = true; break; }
           }
         }
       }

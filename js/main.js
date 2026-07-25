@@ -80,10 +80,12 @@ class Game {
       this.save = Save.defaultSave();
       Save.save(this.save);
       this._startLevel(1);
+      this.player.requestLock();
     });
     $('btn-continue').addEventListener('click', () => {
       unlockAudio();
       this._startLevel(this.save.level);
+      this.player.requestLock();
     });
     $('btn-reset').addEventListener('click', () => {
       Save.wipe();
@@ -96,11 +98,12 @@ class Game {
       Save.save(this.save);
       this.ui.hide('win');
       this._startLevel(1);
+      this.player.requestLock();
     });
     $('sum-next').addEventListener('click', () => {
       this.ui.hide('summary');
       if (this.save.level > MAX_LEVEL) this._win();
-      else this._startLevel(this.save.level);
+      else { this._startLevel(this.save.level); this.player.requestLock(); }
     });
 
     // ---- shop
@@ -195,6 +198,11 @@ class Game {
     };
   }
 
+  /** Only nag about the mouse when we genuinely do not have it. */
+  _promptIfUnlocked() {
+    this.ui.prompt(this.player.locked ? null : 'CLICK TO CAPTURE YOUR MOUSE');
+  }
+
   _afterPurchase(msg) {
     sfx.buy();
     this.stats = derive(this.save);
@@ -276,7 +284,7 @@ class Game {
     this.ui.fadeCaption('');
     this.ui.vignette(false);
     this.ui.crowd(0, 0);
-    this.ui.prompt('CLICK TO CAPTURE YOUR MOUSE');
+    this._promptIfUnlocked();
     sfx.night();
 
     this.ui.toast(`Level ${this.save.level} — ${cfg.locks} padlock${cfg.locks > 1 ? 's' : ''}, ${cfg.rungs} rungs each.`);
@@ -295,8 +303,9 @@ class Game {
   async _beginDay() {
     this.state = 'transition';
     this._dismissOverlays();
+    // Keep pointer lock through the fade: disabling the player already freezes
+    // look and movement, and re-locking needs a fresh click the user never asked for.
     this.player.enabled = false;
-    this.player.releaseLock();
     this.ui.prompt(null);
     this.ui.fadeCaption('OPENING TIME');
     this.ui.fade(true);
@@ -325,7 +334,7 @@ class Game {
     this.ui.setAmmo(this.ammo, this.stats.capacity, '💩');
     this.ui.fadeCaption('');
     this.ui.fade(false);
-    if (!this.player.locked) this.ui.prompt('CLICK TO CAPTURE YOUR MOUSE');
+    this._promptIfUnlocked();
     await sleep(600);
 
     this.ui.toast(this.doorUnlocked

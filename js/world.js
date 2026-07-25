@@ -162,6 +162,82 @@ export class World {
     }
   }
 
+  /**
+   * A solid round obstacle. Rings of boxes look fine but collide badly: adjacent
+   * boxes overlap, so a body caught between two of them gets shoved back and
+   * forth and never escapes. One circle has no such seams.
+   */
+  addCircle(x, z, r, top = 12) {
+    this.colliders.push({ circle: true, x, z, r, hx: r, hz: r, top });
+  }
+
+  /** Does a body of radius `r` at (x, z) overlap this collider? */
+  static overlaps(c, x, z, r) {
+    if (c.circle) {
+      const dx = x - c.x, dz = z - c.z, rr = c.r + r;
+      return dx * dx + dz * dz < rr * rr;
+    }
+    return Math.abs(x - c.x) < c.hx + r && Math.abs(z - c.z) < c.hz + r;
+  }
+
+  /**
+   * Push a body of radius `r` out of everything it overlaps, along whichever
+   * axis needs the least movement, deepest overlap first.
+   *
+   * Returns false if it is still embedded after several passes, which means two
+   * colliders are fighting over it — callers should fall back to a known-clear
+   * position rather than leave the body stuck.
+   */
+  resolveCircle(pos, r, hit = { x: false, z: false }) {
+    hit.x = hit.z = false;
+    // Push a hair past the surface. Landing exactly on it lets rounding leave the
+    // body fractionally inside, which reads as "still stuck" every frame.
+    const SKIN = 0.002;
+
+    for (let pass = 0; pass < 5; pass++) {
+      let worst = null, worstPen = 0, axis = 'x', dir = 1;
+
+      for (const c of this.colliders) {
+        if (!World.overlaps(c, pos.x, pos.z, r)) continue;
+
+        if (c.circle) {
+          const dx = pos.x - c.x, dz = pos.z - c.z;
+          const d = Math.hypot(dx, dz);
+          const pen = c.r + r - d;
+          // dead centre has no natural push direction, so pick one
+          const nx = d > 1e-6 ? dx / d : 1;
+          const nz = d > 1e-6 ? dz / d : 0;
+          if (pen > worstPen) { worst = { nx, nz, pen }; worstPen = pen; axis = 'r'; }
+          continue;
+        }
+        const dx = pos.x - c.x, dz = pos.z - c.z;
+        const ox = c.hx + r - Math.abs(dx);
+        const oz = c.hz + r - Math.abs(dz);
+        const pen = Math.min(ox, oz);
+        if (pen > worstPen) {
+          worstPen = pen;
+          if (ox < oz) { axis = 'x'; dir = dx >= 0 ? 1 : -1; worst = { pen: ox }; }
+          else { axis = 'z'; dir = dz >= 0 ? 1 : -1; worst = { pen: oz }; }
+        }
+      }
+
+      if (!worst) return true;
+      if (axis === 'r') {
+        pos.x += worst.nx * (worst.pen + SKIN);
+        pos.z += worst.nz * (worst.pen + SKIN);
+        hit.x = hit.z = true;
+      } else if (axis === 'x') {
+        pos.x += dir * (worst.pen + SKIN);
+        hit.x = true;
+      } else {
+        pos.z += dir * (worst.pen + SKIN);
+        hit.z = true;
+      }
+    }
+    // the last pass may well have freed it — say so rather than forcing a rewind
+    return !this.colliders.some(c => World.overlaps(c, pos.x, pos.z, r));
+  }
+
   isOpen(x, z, pad = 1.4) {
     if (Math.abs(x) > WORLD.half - 2 || Math.abs(z) > WORLD.half - 2) return false;
     for (const c of this.colliders) {
@@ -175,7 +251,7 @@ export class World {
     const lim = WORLD.half - 1.2;
     if (Math.abs(x) > lim || Math.abs(z) > lim) return false;
     for (const c of this.colliders) {
-      if (Math.abs(x - c.x) < c.hx + r && Math.abs(z - c.z) < c.hz + r) return false;
+      if (World.overlaps(c, x, z, r)) return false;
     }
     return true;
   }
@@ -385,15 +461,18 @@ export class World {
       { x: 0,   z: 66 - 12, r: 7 },
     ];
     for (const s of spots) {
-      const segs = 12;
+      // Hedge segments are decoration only. The enclosure collides as one solid
+      // disc: a ring of overlapping boxes leaves seams you can squeeze into and
+      // then get shoved between, and there is nothing in there worth reaching.
+      const segs = 16;
       for (let i = 0; i < segs; i++) {
         const a = (i / segs) * Math.PI * 2;
         const x = s.x + Math.cos(a) * s.r;
         const z = s.z + Math.sin(a) * s.r;
-        const seg = this.box(3.0, 1.15, 0.7, MATS.hedge, x, 0.58, z, { rotY: -a + Math.PI / 2 });
-        this.addCollider(x, z, 1.4, 1.4, 0, 1.15);
+        const seg = this.box(3.4, 1.15, 0.7, MATS.hedge, x, 0.58, z, { rotY: -a + Math.PI / 2 });
         seg.receiveShadow = true;
       }
+      this.addCircle(s.x, s.z, s.r + 0.35, 1.15);
       // a lumpy rock and a lonely tree inside
       const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(2.2 + rng() * 1.4, 0), MATS.rock);
       rock.position.set(s.x + (rng() - 0.5) * 3, 1.3, s.z + (rng() - 0.5) * 3);

@@ -308,7 +308,21 @@ kbd {
 
 /* ================= LOCK PUZZLE ================= */
 #lock-canvas { width: 100%; max-width: 420px; height: auto; aspect-ratio: 1; touch-action: none; cursor: pointer; }
-#lock-title { font-size: 17px; letter-spacing: 0.14em; color: var(--gold); margin-bottom: 10px; }
+
+/* The clock keeps running while you fumble with the padlock, so it has to be
+   readable from in here — the overlay dims the HUD behind it. */
+.lock-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; margin-bottom: 12px;
+}
+#lock-title { font-size: 17px; letter-spacing: 0.14em; color: var(--gold); text-align: left; }
+.lock-clock { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; }
+.lock-clock-label { font-size: 9px; letter-spacing: 0.18em; opacity: 0.5; margin-bottom: 3px; }
+#lock-timer {
+  font-size: 28px; font-weight: 800; letter-spacing: 0.02em; color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+#lock-timer.urgent { color: var(--red); animation: pulse 0.7s infinite; }
 #lock-status { margin-top: 8px; font-size: 14px; min-height: 22px; opacity: 0.8; }
 #lock-status.fail { color: var(--red); font-weight: 800; opacity: 1; }
 #lock-status.win  { color: var(--green); font-weight: 800; opacity: 1; }

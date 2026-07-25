@@ -109,6 +109,96 @@ run('the cage door blocks movement until it is picked, then does not', () => {
   assert.equal(w.standable(doorway.x, doorway.z), false, 'the janitor re-locks it behind you');
 });
 
+// Regression: enclosures were a ring of twelve overlapping box colliders. You
+// could squeeze between two of them, and once inside, adjacent boxes shoved you
+// back and forth forever. They are one solid disc now.
+run('you cannot get inside a hedge enclosure', () => {
+  const w = build(1);
+  const rings = w.colliders.filter(c => c.circle);
+  assert.ok(rings.length >= 4, 'expected the enclosures to collide as circles');
+  for (const ring of rings) {
+    assert.equal(w.standable(ring.x, ring.z), false, 'the middle of an enclosure must be solid');
+    // and no radial approach may pass straight through the hedge
+    for (let deg = 0; deg < 360; deg += 3) {
+      const a = deg * Math.PI / 180;
+      let crossed = true;
+      for (let d = ring.r + 2; d > ring.r - 2; d -= 0.2) {
+        if (!w.standable(ring.x + Math.cos(a) * d, ring.z + Math.sin(a) * d)) { crossed = false; break; }
+      }
+      assert.equal(crossed, false, `a gap at ${deg}deg lets you walk into the enclosure`);
+    }
+  }
+});
+
+run('a body that starts clear can never end up embedded in geometry', () => {
+  const w = build(1);
+  const r = WORLD.playerRadius;
+  const rings = w.colliders.filter(c => c.circle);
+
+  // walk hard into every enclosure from all around it
+  let checked = 0;
+  for (const ring of rings) {
+    for (let deg = 0; deg < 360; deg += 7) {
+      const a = deg * Math.PI / 180;
+      const pos = { x: ring.x + Math.cos(a) * (ring.r + 5), z: ring.z + Math.sin(a) * (ring.r + 5) };
+      if (!w.standable(pos.x, pos.z, r)) continue;
+      let safe = { x: pos.x, z: pos.z };
+      checked++;
+      for (let f = 0; f < 80; f++) {
+        pos.x -= Math.cos(a) * 0.12;
+        pos.z -= Math.sin(a) * 0.12;
+        if (w.resolveCircle(pos, r)) safe = { x: pos.x, z: pos.z };
+        else { pos.x = safe.x; pos.z = safe.z; }
+      }
+      assert.ok(w.standable(pos.x, pos.z, r),
+        `walked into the enclosure at ${deg}deg and ended inside geometry`);
+    }
+  }
+  assert.ok(checked > 100, 'expected to have actually run the sweep');
+});
+
+run('resolveCircle pushes a body clear of a solid disc from any angle', () => {
+  const w = build(1);
+  const ring = w.colliders.find(c => c.circle);
+  const r = WORLD.playerRadius;
+  for (let deg = 0; deg < 360; deg += 11) {
+    for (const frac of [0, 0.01, 0.4, 0.9, 1.05]) {
+      const a = deg * Math.PI / 180;
+      const pos = { x: ring.x + Math.cos(a) * ring.r * frac, z: ring.z + Math.sin(a) * ring.r * frac };
+      w.resolveCircle(pos, r);
+      const d = Math.hypot(pos.x - ring.x, pos.z - ring.z);
+      assert.ok(d >= ring.r + r - 1e-6,
+        `left at ${d.toFixed(3)} from a disc of radius ${ring.r} (needs ${(ring.r + r).toFixed(3)})`);
+    }
+  }
+});
+
+run('nowhere walkable leaves you unable to move in any direction', () => {
+  const w = build(1);
+  const r = WORLD.playerRadius;
+  const stuck = [];
+  for (let x = -64; x <= 64; x += 4) {
+    for (let z = -64; z <= 64; z += 4) {
+      if (!w.standable(x, z, r)) continue;
+      let moved = 0;
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        const pos = { x, z };
+        let safe = { x, z };
+        for (let f = 0; f < 20; f++) {
+          pos.x += Math.cos(a) * 0.12;
+          pos.z += Math.sin(a) * 0.12;
+          if (w.resolveCircle(pos, r)) safe = { x: pos.x, z: pos.z };
+          else { pos.x = safe.x; pos.z = safe.z; }
+        }
+        if (Math.hypot(pos.x - x, pos.z - z) > 0.6) moved++;
+      }
+      if (moved === 0) stuck.push([x, z]);
+    }
+  }
+  assert.deepEqual(stuck, [], `immobile spots found: ${JSON.stringify(stuck.slice(0, 5))}`);
+});
+
 run('guards get somewhere open to patrol, clear of the cage', () => {
   const w = build(1);
   for (const p of w.waypoints) {

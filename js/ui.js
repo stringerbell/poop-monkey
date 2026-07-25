@@ -15,7 +15,8 @@ export class UI {
       vignette: $('alert-vignette'), viewmodel: $('viewmodel'), fade: $('fade'),
       shopBody: $('shop-body'), shopCoins: $('shop-coins'),
       sumTitle: $('sum-title'), sumScold: $('sum-scold'), sumStats: $('sum-stats'),
-      winStats: $('win-stats'), lockTitle: $('lock-title'), lockStatus: $('lock-status'), lockPips: $('lock-pips'),
+      winStats: $('win-stats'), lockTitle: $('lock-title'), lockStatus: $('lock-status'),
+      lockPips: $('lock-pips'), lockTimer: $('lock-timer'),
     };
     this.shopTab = 'weapons';
     this._lastPrompt = null;
@@ -77,8 +78,13 @@ export class UI {
     const s = Math.max(0, Math.ceil(sec));
     if (s === this._lastSec) return;   // only touch the DOM once a second
     this._lastSec = s;
-    this.el.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-    this.el.timer.classList.toggle('urgent', s <= 20);
+    const text = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    const urgent = s <= 20;
+    this.el.timer.textContent = text;
+    this.el.timer.classList.toggle('urgent', urgent);
+    // the lock overlay hides the HUD, so it carries its own copy of the clock
+    this.el.lockTimer.textContent = text;
+    this.el.lockTimer.classList.toggle('urgent', urgent);
   }
   setCoins(n) {
     this.el.coins.innerHTML = `<span class="ico">🪙</span> ${n}`;

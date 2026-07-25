@@ -15,6 +15,19 @@ const M = {
   hiviz:    new THREE.MeshLambertMaterial({ color: 0xd8e84a }),
 };
 
+/**
+ * Move an NPC out of anything it is overlapping. Returns true if it touched
+ * something, which callers use as "that route is blocked, pick another".
+ * Falls back to the last clear spot so an NPC can never wedge itself.
+ */
+function nudge(world, pos, radius, body) {
+  const hit = { x: false, z: false };
+  const clear = world.resolveCircle(pos, radius, hit);
+  if (clear) body.safe = { x: pos.x, z: pos.z };
+  else if (body.safe) { pos.x = body.safe.x; pos.z = body.safe.z; }
+  return hit.x || hit.z;
+}
+
 const SKINS = [0xc79a6b, 0x8d5a3b, 0xefc9a4, 0x6b4227, 0xa9784f, 0xd9ab84];
 const SHIRTS = [0xd94f4f, 0x4f7fd9, 0x4fd97f, 0xd9c14f, 0xa14fd9, 0xd97f4f, 0xe8e8e8, 0x3b3b46];
 const LEGS = [0x2b3a55, 0x4a4a52, 0x6b5030, 0x30506b, 0x8a3f5a];
@@ -231,23 +244,10 @@ export class Janitor {
     this.facing += Math.max(-2.6 * dt, Math.min(2.6 * dt, d));
     if (speed <= 0) return;
 
-    const r = 0.5;
     this.pos.x += (aimX / len) * speed * dt;
-    this._resolve('x', r);
     this.pos.z += (aimZ / len) * speed * dt;
-    this._resolve('z', r);
+    if (nudge(this.world, this.pos, 0.5, this)) this.wander = null;
     this.walk += dt * speed * 1.7;
-  }
-
-  _resolve(axis, r) {
-    for (const c of this.world.colliders) {
-      const dx = this.pos.x - c.x, dz = this.pos.z - c.z;
-      const ox = c.hx + r - Math.abs(dx), oz = c.hz + r - Math.abs(dz);
-      if (ox <= 0 || oz <= 0) continue;
-      if (axis === 'x') this.pos.x += dx >= 0 ? ox : -ox;
-      else this.pos.z += dz >= 0 ? oz : -oz;
-      this.wander = null;
-    }
   }
 
   _render(dt, speed, dist) {
@@ -424,23 +424,10 @@ export class Patron {
     this.facing += Math.max(-3.2 * dt, Math.min(3.2 * dt, d));
     if (speed <= 0) return;
 
-    const r = 0.45;
     this.pos.x += (aimX / len) * speed * dt;
-    this._resolve('x', r);
     this.pos.z += (aimZ / len) * speed * dt;
-    this._resolve('z', r);
+    if (nudge(this.world, this.pos, 0.45, this)) this.wander = null;
     this.walk += dt * speed * 1.9;
-  }
-
-  _resolve(axis, r) {
-    for (const c of this.world.colliders) {
-      const dx = this.pos.x - c.x, dz = this.pos.z - c.z;
-      const ox = c.hx + r - Math.abs(dx), oz = c.hz + r - Math.abs(dz);
-      if (ox <= 0 || oz <= 0) continue;
-      if (axis === 'x') this.pos.x += dx >= 0 ? ox : -ox;
-      else this.pos.z += dz >= 0 ? oz : -oz;
-      this.wander = null;
-    }
   }
 
   dispose() {

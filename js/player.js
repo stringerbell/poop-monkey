@@ -13,6 +13,8 @@ export class Player {
     this.yaw = 0;
     this.pitch = 0;
 
+    this.safe = new THREE.Vector3();   // last position known to be clear
+    this._hit = { x: false, z: false };
     this.keys = new Set();
     this.locked = false;
     this.enabled = true;
@@ -56,6 +58,7 @@ export class Player {
 
   teleport(x, z, yaw = 0) {
     this.pos.set(x, WORLD.eyeHeight, z);
+    this.safe.set(x, 0, z);
     this.vel.set(0, 0, 0);
     this.yaw = yaw;
     this.pitch = 0;
@@ -102,15 +105,26 @@ export class Player {
     if (Math.abs(this.vel.x) < 0.01) this.vel.x = 0;
     if (Math.abs(this.vel.z) < 0.01) this.vel.z = 0;
 
-    // move on each axis separately so sliding along walls feels right
     this.pos.x += this.vel.x * dt;
-    this._resolve(world, 'x');
     this.pos.z += this.vel.z * dt;
-    this._resolve(world, 'z');
 
     const lim = WORLD.half - 1.2;
     this.pos.x = Math.max(-lim, Math.min(lim, this.pos.x));
     this.pos.z = Math.max(-lim, Math.min(lim, this.pos.z));
+
+    const clear = world.resolveCircle(this.pos, WORLD.playerRadius, this._hit);
+    if (this._hit.x) this.vel.x = 0;
+    if (this._hit.z) this.vel.z = 0;
+
+    // Colliders that overlap each other can shove a body back and forth forever.
+    // Rewinding to the last spot known to be clear makes being stuck impossible.
+    if (clear) {
+      this.safe.set(this.pos.x, 0, this.pos.z);
+    } else if (this.safe.lengthSq()) {
+      this.pos.x = this.safe.x;
+      this.pos.z = this.safe.z;
+      this.vel.set(0, 0, 0);
+    }
 
     // head bob
     const moving = Math.hypot(this.vel.x, this.vel.z);
@@ -119,24 +133,6 @@ export class Player {
 
     this.camera.position.set(this.pos.x, this.pos.y + bobY, this.pos.z);
     this.camera.rotation.set(this.pitch, this.yaw, Math.sin(this.bob * 2) * 0.004, 'YXZ');
-  }
-
-  _resolve(world, axis) {
-    const r = WORLD.playerRadius;
-    for (const c of world.colliders) {
-      const dx = this.pos.x - c.x;
-      const dz = this.pos.z - c.z;
-      const ox = c.hx + r - Math.abs(dx);
-      const oz = c.hz + r - Math.abs(dz);
-      if (ox <= 0 || oz <= 0) continue;
-      if (axis === 'x') {
-        this.pos.x += dx >= 0 ? ox : -ox;
-        this.vel.x = 0;
-      } else {
-        this.pos.z += dz >= 0 ? oz : -oz;
-        this.vel.z = 0;
-      }
-    }
   }
 
   get speed2D() { return Math.hypot(this.vel.x, this.vel.z); }
