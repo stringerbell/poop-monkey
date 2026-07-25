@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Poop Monkey</title>
+<meta name="description" content="A first-person zoo-escape game. Eat, escape, and pelt the guards.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%90%92%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="./css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.169.0/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <!-- ============ HUD ============ -->
+  <div id="hud" class="hidden">
+    <div class="hud-corner tl">
+      <div class="pill" id="hud-level">LEVEL 1</div>
+      <div class="pill" id="hud-phase">DAY</div>
+      <div class="pill big" id="hud-timer">3:00</div>
+    </div>
+
+    <div class="hud-corner tr">
+      <div class="pill" id="hud-coins"><span class="ico">🪙</span> 0</div>
+      <div class="pill" id="hud-hits"><span class="ico">🎯</span> 0</div>
+      <button id="shop-btn" class="pill btn">🛒 SHOP <kbd>B</kbd></button>
+    </div>
+
+    <div class="hud-corner bl">
+      <div class="pill" id="hud-weapon">BARE ARM</div>
+      <div class="ammo"><span class="ico">💩</span><span id="hud-ammo">0</span><span class="ammo-max">/30</span></div>
+    </div>
+
+    <div class="hud-corner br">
+      <div class="pill dim" id="hud-help">WASD move &middot; SHIFT sprint &middot; E interact &middot; CLICK throw</div>
+    </div>
+
+    <div id="crosshair"><div class="ch-dot"></div></div>
+    <div id="prompt" class="hidden"></div>
+    <div id="toast-wrap"></div>
+    <div id="alert-vignette"></div>
+  </div>
+
+  <!-- ============ VIEWMODEL / MONKEY ARM ============ -->
+  <div id="viewmodel" class="hidden">
+    <div class="arm"><div class="paw"></div><div class="held"></div></div>
+  </div>
+
+  <!-- ============ OVERLAYS ============ -->
+  <div id="fade"></div>
+
+  <div id="menu" class="overlay">
+    <div class="panel wide">
+      <h1 class="title">POOP<span>MONKEY</span></h1>
+      <p class="tag">Escape the cage. Eat everything. Ruin the night shift.</p>
+      <div class="menu-grid">
+        <div class="card">
+          <h3>☀️ DAY &mdash; 3:00</h3>
+          <p>Find the cage door, pick the lock, then raid the zoo for half-eaten food. Every scrap becomes ammo.</p>
+        </div>
+        <div class="card">
+          <h3>🌙 NIGHT</h3>
+          <p>Your door is already open. Splatter guards, dodge their taser zones, and hoover up the coins they drop.</p>
+        </div>
+        <div class="card">
+          <h3>🚀 UPGRADE</h3>
+          <p>Spend coins on speed, stealth, disguises &mdash; and work your arm up to the R.P.P. cannon.</p>
+        </div>
+      </div>
+      <div class="menu-actions">
+        <button id="btn-play" class="big-btn">START</button>
+        <button id="btn-continue" class="big-btn ghost hidden">CONTINUE &mdash; LEVEL <span id="continue-level">1</span></button>
+        <button id="btn-reset" class="link-btn hidden">erase save</button>
+      </div>
+      <p class="fine">Click the game to capture your mouse. <kbd>ESC</kbd> releases it.</p>
+    </div>
+  </div>
+
+  <div id="lock" class="overlay">
+    <div class="panel lock-panel">
+      <h2 id="lock-title">CAGE LOCK 1 / 1</h2>
+      <canvas id="lock-canvas" width="420" height="420"></canvas>
+      <div id="lock-status">Hit <kbd>SPACE</kbd> or click when the bar is in the green.</div>
+      <div id="lock-pips" class="pips"></div>
+      <button id="lock-close" class="link-btn">back away (ESC)</button>
+    </div>
+  </div>
+
+  <div id="shop" class="overlay">
+    <div class="panel wide">
+      <div class="shop-head">
+        <h2>ZOO GIFT SHOP <small>(after hours)</small></h2>
+        <div class="wallet"><span class="ico">🪙</span><span id="shop-coins">0</span></div>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="weapons">💩 LAUNCHERS</button>
+        <button class="tab" data-tab="movement">👟 MOVEMENT</button>
+        <button class="tab" data-tab="cosmetics">🎭 DISGUISES</button>
+      </div>
+      <div id="shop-body" class="shop-body"></div>
+      <button id="shop-close" class="big-btn">BACK TO THE ZOO <kbd>B</kbd></button>
+    </div>
+  </div>
+
+  <div id="summary" class="overlay">
+    <div class="panel">
+      <h2 id="sum-title">NIGHT OVER</h2>
+      <div id="sum-scold" class="scold"></div>
+      <div id="sum-stats" class="stats"></div>
+      <button id="sum-next" class="big-btn">NEXT DAY</button>
+    </div>
+  </div>
+
+  <div id="win" class="overlay">
+    <div class="panel">
+      <h1 class="title">FREE<span>MONKEY</span></h1>
+      <p class="tag">50 nights. One legend. The zoo will never recover.</p>
+      <div id="win-stats" class="stats"></div>
+      <button id="win-again" class="big-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <div id="loading" class="overlay show"><div class="panel slim"><div class="spinner"></div><p>Loading the zoo&hellip;</p></div></div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
